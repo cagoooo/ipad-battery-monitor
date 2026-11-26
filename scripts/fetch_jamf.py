@@ -59,6 +59,7 @@ class Jamf:
     def __init__(self, base: str):
         self.base = base.rstrip("/")
         self.token = None
+        self.kind = None
 
     def _req(self, method, path, headers=None, data=None, timeout=60, raw=False):
         r = urllib.request.Request(self.base + path, method=method, headers=headers or {}, data=data)
@@ -68,19 +69,35 @@ class Jamf:
                 return body
             return json.loads(body) if body else None
 
-    def login(self):
+    def login(self, use_client=True):
         cid, secret = os.environ.get("JAMF_CLIENT_ID"), os.environ.get("JAMF_CLIENT_SECRET")
-        if cid and secret:
+        if use_client and cid and secret:
             data = urllib.parse.urlencode({"client_id": cid, "client_secret": secret,
                                            "grant_type": "client_credentials"}).encode()
             res = self._req("POST", "/api/oauth/token",
                             {"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"}, data)
             self.token, self.kind = res["access_token"], "oauth"
+            log("以 API 用戶端登入 Jamf")
         else:
             user, pw = os.environ["JAMF_USER"], os.environ["JAMF_PASSWORD"]
             basic = base64.b64encode(f"{user}:{pw}".encode()).decode()
             res = self._req("POST", "/api/v1/auth/token", {"Authorization": "Basic " + basic, "Accept": "application/json"})
             self.token, self.kind = res["token"], "basic"
+            log("以帳號密碼登入 Jamf")
+
+    def login_and_fetch(self):
+        """先用 API 用戶端；登入或讀取失敗、而且還有帳號密碼時，自動改用帳號密碼（切換期間不中斷）。"""
+        try:
+            self.login()
+            return self.mobile_devices()
+        except urllib.error.HTTPError as e:
+            tried_client = os.environ.get("JAMF_CLIENT_ID") and os.environ.get("JAMF_CLIENT_SECRET")
+            if not tried_client or self.kind == "basic" or not (os.environ.get("JAMF_USER") and os.environ.get("JAMF_PASSWORD")):
+                raise
+            log("API 用戶端無法讀取平板資料：HTTP", e.code, "，改用帳號密碼")
+            self.token = None
+            self.login(use_client=False)
+            return self.mobile_devices()
 
     def get(self, path):
         return self._req("GET", path, {"Authorization": "Bearer " + self.token, "Accept": "application/json"})
@@ -287,8 +304,7 @@ def main():
     now = dt.datetime.now(UTC)
     jamf = Jamf(os.environ["JAMF_URL"])
     try:
-        jamf.login()
-        devs = jamf.mobile_devices()
+        devs = jamf.login_and_fetch()
         last_cmd = parse_time(prev.get("inventoryCommandAt"))
         interval = float(os.environ.get("JAMF_UPDATE_INTERVAL_MIN") or 60)
         if os.environ.get("JAMF_SEND_UPDATE_INVENTORY") == "1":
