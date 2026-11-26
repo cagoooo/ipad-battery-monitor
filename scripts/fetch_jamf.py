@@ -133,6 +133,14 @@ def is_night(t: dt.datetime):
     return hm >= NIGHT_START or hm < NIGHT_END  # 例如 22:00～06:00 跨過午夜
 
 
+def night_date(t: dt.datetime):
+    """這筆回報屬於哪一晚：跨午夜的時段（例如 22:00～06:00）算到隔天。"""
+    local = t.astimezone(TPE)
+    if NIGHT_START > NIGHT_END and local.timetuple()[3:5] >= NIGHT_START:
+        local += dt.timedelta(days=1)
+    return local.strftime("%Y-%m-%d")
+
+
 def build(devs, prev, now):
     prev_by_id = {str(d["id"]): d for d in prev.get("devices", [])}
     cutoff = now - dt.timedelta(days=HISTORY_DAYS)
@@ -148,11 +156,14 @@ def build(devs, prev, now):
         contact = parse_time(g.get("lastContactDate"))
 
         hist = [list(p) for p in prev_by_id.get(did, {}).get("history", [])]
-        if rep and bat is not None and (not hist or hist[-1][0] != iso(rep)):
+        if rep and bat is not None and all(p[0] != iso(rep) for p in hist):
             hist.append([iso(rep), bat])
-        hist = [p for p in hist if parse_time(p[0]) and parse_time(p[0]) >= cutoff][-HISTORY_MAX:]
+        # 依時間排好：Jamf 偶爾會把「回報時間」倒回比較舊的一筆，不排序的話最新一筆會算錯
+        uniq = {p[0]: p for p in hist if parse_time(p[0]) and parse_time(p[0]) >= cutoff}  # 同一時間只留一筆
+        hist = sorted(uniq.values(), key=lambda p: parse_time(p[0]))[-HISTORY_MAX:]
 
         flags = []
+        night_of = None  # 「半夜沒充飽」是哪一晚（台灣日期），每晚各提醒一次
         age_h = (now - rep).total_seconds() / 3600 if rep else None
         if bat is not None:
             if bat < CRITICAL:
@@ -168,6 +179,7 @@ def build(devs, prev, now):
             # 但之後若已回升到 80% 以上，就代表其實有在充，不必再追
             if recent_night and recent_night[-1][1] < NIGHT_FULL and hist[-1][1] < NIGHT_FULL:
                 flags.append("night")
+                night_of = night_date(parse_time(recent_night[-1][0]))
             # 跟「至少 2 小時前」的那次回報比：兩次都低於 50%，而且沒有回升
             # （平板每小時回報一次，只比相鄰兩次的話永遠湊不到 2 小時）
             if len(hist) >= 2:
@@ -178,14 +190,14 @@ def build(devs, prev, now):
                     if b1 < LOW and b2 < LOW and b2 <= b1 + 2:
                         flags.append("persist")
         trend = None
-        if len(hist) >= 2:
+        if len(hist) >= 2 and rep and hist[-1][0] == iso(rep):
             trend = hist[-1][1] - hist[-2][1]
 
         out.append({
             "id": did, "name": name, "user": user, "cart": cart, "cartLabel": cart_label,
             "kind": kind, "slot": slot, "model": h.get("model") or "", "battery": bat,
             "reportedAt": iso(rep), "contactAt": iso(contact), "trend": trend,
-            "flags": flags, "history": hist,
+            "flags": flags, "nightOf": night_of, "history": hist,
         })
     return out
 
@@ -202,11 +214,20 @@ def summarize(devices):
 ALERT_FLAGS = ("critical", "night", "persist")
 
 
+def alert_tags(d):
+    """這台現在要通知的標記；「半夜沒充飽」帶上是哪一晚，例如 night@2026-11-27。"""
+    tags = {f for f in d["flags"] if f in ALERT_FLAGS and f != "night"}
+    if "night" in d["flags"]:
+        tags.add("night@" + (d.get("nightOf") or ""))
+    return tags
+
+
 def notify(devices, prev, now):
     """同一台平板出現「新的」問題標記才推播。
 
-    alerted 記的是每台「已經通知過的標記」，例如 {"123": "critical,night"}。
+    alerted 記的是每台「已經通知過的標記」，例如 {"123": "critical,night@2026-11-27"}。
     平板每小時回報一次也不會重複通知；某個標記解除後又出現，才會再通知。
+    「半夜沒充飽」每晚各算一次：前一晚通知過、隔天半夜還是沒充飽，會再提醒一次。
     """
     hook = os.environ.get("GCHAT_WEBHOOK")
     by_id = {d["id"]: d for d in devices}
@@ -215,18 +236,20 @@ def notify(devices, prev, now):
         d = by_id.get(k)
         if not d:
             continue
-        cur = {f for f in d["flags"] if f in ALERT_FLAGS}
+        cur = alert_tags(d)
         if re.match(r"\d{4}-", str(v)):
             # 舊格式（記回報時間）：當作現在的標記都通知過了，避免改版後一次重推；
             # 「連續低電量」是這版才修好的判斷，第一次出現仍要通知
             known[k] = cur - {"persist"}
         else:
-            known[k] = set(filter(None, str(v).split(","))) & cur  # 已解除的標記拿掉，之後再出現會再通知
+            old = set(filter(None, str(v).split(",")))
+            if "night" in old:  # 沒有日期的舊寫法：當作這一晚已經通知過
+                old = (old - {"night"}) | {t for t in cur if t.startswith("night@")}
+            known[k] = old & cur  # 已解除的標記拿掉，之後再出現會再通知
     fresh = []
     for d in devices:
-        cur = {f for f in d["flags"] if f in ALERT_FLAGS}
         if (d["kind"] == "student" and d["reportedAt"] and "stale" not in d["flags"]
-                and cur - known.get(d["id"], set())):
+                and alert_tags(d) - known.get(d["id"], set())):
             fresh.append(d)
     if hook and fresh:
         reason = {"critical": "電量危險", "night": "半夜沒充飽", "persist": "連續低電量"}
@@ -242,7 +265,7 @@ def notify(devices, prev, now):
                                          headers={"Content-Type": "application/json; charset=UTF-8"})
             urllib.request.urlopen(req, timeout=20).read()
             for d in fresh:  # 推播成功才記「已通知」，失敗下次會再推
-                known[d["id"]] = known.get(d["id"], set()) | {f for f in d["flags"] if f in ALERT_FLAGS}
+                known[d["id"]] = known.get(d["id"], set()) | alert_tags(d)
             log(f"已推播 {len(fresh)} 台")
         except Exception as e:  # 推播失敗不影響後台更新
             log("推播失敗：", type(e).__name__)
