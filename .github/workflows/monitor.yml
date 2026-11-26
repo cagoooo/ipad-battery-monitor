@@ -3,7 +3,7 @@ name: iPad 電量監控（每 15 分鐘）
 on:
   schedule:
     # GitHub 整點最塞，故意錯開分鐘數（UTC 時間，全天都跑）
-    - cron: "7,22,37,52 * * * *"
+    - cron: "3,18,33,48 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
