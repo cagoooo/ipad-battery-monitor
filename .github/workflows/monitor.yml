@@ -65,5 +65,15 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+      # GitHub 偶爾剛收下網頁包裹、自己卻還查不到（Found 0 artifact），先等一下再發布，失敗就再試一次
+      - name: 等 GitHub 登記好網頁包裹
+        run: sleep 8
       - id: deploy
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - name: 發布失敗時等 30 秒再試
+        if: steps.deploy.outcome == 'failure'
+        run: sleep 30
+      - id: deploy_retry
+        if: steps.deploy.outcome == 'failure'
         uses: actions/deploy-pages@v4
