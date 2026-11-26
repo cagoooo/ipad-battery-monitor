@@ -4,6 +4,7 @@
   const DONE_KEY = 'ipadBatt.done.v1';
   const PREF_KEY = 'ipadBatt.pref.v1';
   const REFRESH_MS = 5 * 60 * 1000;
+  const APP_VERSION = '1.3.0'; // 改版時同步改 sw.js、version.json、index.html 的 ?v=
   const FLAG = {
     critical: { t: '電量危險', c: 'var(--crit)' },
     low: { t: '電量偏低', c: 'var(--low)' },
@@ -222,8 +223,78 @@
     try { await navigator.clipboard.writeText(text); toast(`已複製 ${items.length} 台的清單，可以貼到 LINE`); } catch { toast('複製失敗，請手動選取'); }
   });
 
+  // ── 新版本通知 ──────────────────────────────────────────
+  // 用 version.json 當「閘門」：版本號真的不一樣才提示，避免假更新一直跳。
+  const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  const RELOAD_KEY = 'ipadBatt.reloadedFor';
+  let swReg = null;
+  let newVersion = null;
+  let wantReload = false;
+
+  function showUpdate(ver) {
+    newVersion = ver;
+    $('#updateVer').textContent = `v${ver}`;
+    $('#updateBar').hidden = false;
+  }
+
+  async function checkVersion() {
+    try {
+      const res = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const { version } = await res.json();
+      if (!version || version === APP_VERSION) {
+        sessionStorage.removeItem(RELOAD_KEY);
+        return;
+      }
+      if (swReg) swReg.update().catch(() => {}); // 順便請瀏覽器去抓新的 Service Worker
+      showUpdate(version);
+    } catch { /* 斷線時略過 */ }
+  }
+
+  function applyUpdate() {
+    $('#updateBar').hidden = true;
+    const waiting = swReg && swReg.waiting;
+    // 同一個版本已經重新整理過還是舊的（網頁快取還沒過期）：改用帶版本號的網址強制拿新頁
+    const already = sessionStorage.getItem(RELOAD_KEY) === newVersion;
+    sessionStorage.setItem(RELOAD_KEY, newVersion || '');
+    if (waiting && !already) {
+      wantReload = true;
+      waiting.postMessage({ type: 'SKIP_WAITING' });
+      setTimeout(() => location.reload(), 3000); // 保險：新 Service Worker 沒接手也照樣重新整理
+    } else if (already) {
+      location.replace(`${location.pathname}?v=${encodeURIComponent(newVersion)}`);
+    } else {
+      location.reload();
+    }
+  }
+
+  $('#updateNow').addEventListener('click', applyUpdate);
+  $('#updateLater').addEventListener('click', () => { $('#updateBar').hidden = true; });
+
+  if ('serviceWorker' in navigator) {
+    if (isLocal) {
+      // 本機開發不用 Service Worker，避免快取擋住修改
+      navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister()));
+    } else {
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (wantReload) location.reload(); });
+      navigator.serviceWorker.register('sw.js').then((reg) => {
+        swReg = reg;
+        reg.addEventListener('updatefound', () => {
+          const nw = reg.installing;
+          if (!nw) return;
+          nw.addEventListener('statechange', () => {
+            // 已經有舊版在控制畫面、新版裝好在等待 → 再用 version.json 確認真的換版
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) checkVersion();
+          });
+        });
+      }).catch(() => {});
+    }
+  }
+
   fetchData();
+  checkVersion();
   setInterval(fetchData, REFRESH_MS);
+  setInterval(checkVersion, REFRESH_MS);
   setInterval(() => data && renderStatus(), 60 * 1000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) fetchData(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { fetchData(); checkVersion(); } });
 })();

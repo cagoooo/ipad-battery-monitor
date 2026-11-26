@@ -66,6 +66,9 @@ jobs:
             git push
           fi
 
+      - name: 分享卡片網址換成這個專案的網址（別校套用時 LINE、Facebook 預覽圖才抓得到）
+        run: sed -i "s#https://cagoooo.github.io/ipad-battery-monitor/#${SITE_URL}#g" site/index.html
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

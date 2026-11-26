@@ -178,3 +178,22 @@ main { padding: clamp(16px, 2vw, 28px) 0 40px; display: grid; gap: clamp(16px, 2
   .slots { grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); }
 }
 @media print { .site-footer, .top .status, .controls { display: none; } }
+
+/* 新版本通知列 */
+.update-bar {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 50;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center;
+  width: min(680px, calc(100% - 24px)); padding: 14px 18px; border-radius: 16px;
+  background: #1f6f5c; color: #fff; box-shadow: 0 12px 32px rgba(0,0,0,.25);
+  font-size: var(--fs-sm, 15px); line-height: 1.5;
+}
+.update-bar[hidden] { display: none; }
+.update-bar span { flex: 1 1 260px; }
+.update-bar button { border: 0; border-radius: 999px; padding: 8px 18px; font: inherit; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.btn-update { background: #ffc56b; color: #3b2a00; }
+.btn-later { background: rgba(255,255,255,.16); color: #fff; }
+@media (max-width: 520px) {
+  .update-bar { bottom: 12px; padding: 12px 14px; }
+  .update-bar span { flex-basis: 100%; }
+  .update-bar button { flex: 1; }
+}
