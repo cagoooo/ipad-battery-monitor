@@ -196,18 +196,12 @@ def notify(devices, prev, now):
     """有新出現的問題才推播；同一台同一次回報只通知一次。"""
     hook = os.environ.get("GCHAT_WEBHOOK")
     alerted = dict(prev.get("alerted", {}))
-    fresh = []
-    for d in devices:
-        if d["kind"] != "student" or not d["reportedAt"] or "stale" in d["flags"]:
-            continue
-        if any(f in d["flags"] for f in ("critical", "night", "persist")) and alerted.get(d["id"]) != d["reportedAt"]:
-            fresh.append(d)
-            alerted[d["id"]] = d["reportedAt"]
-    # 只保留還在問題清單上的紀錄，避免無限長大
-    live = {d["id"] for d in devices if any(f in d["flags"] for f in ("critical", "night", "persist", "low"))}
-    alerted = {k: v for k, v in alerted.items() if k in live}
+    fresh = [d for d in devices
+             if d["kind"] == "student" and d["reportedAt"] and "stale" not in d["flags"]
+             and any(f in d["flags"] for f in ("critical", "night", "persist"))
+             and alerted.get(d["id"]) != d["reportedAt"]]
     if hook and fresh:
-        reason = {"critical": "電量危險", "night": "整晚沒充飽", "persist": "連續低電量"}
+        reason = {"critical": "電量危險", "night": "半夜沒充飽", "persist": "連續低電量"}
         lines = [f"🔋 *平板電量警示*（{now.astimezone(TPE):%m/%d %H:%M}）新發現 {len(fresh)} 台需要檢查充電線："]
         for d in sorted(fresh, key=lambda d: (d["cart"], d["slot"] or 0))[:30]:
             tags = "、".join(reason[f] for f in d["flags"] if f in reason)
@@ -216,13 +210,17 @@ def notify(devices, prev, now):
         if site:
             lines.append(f"👉 監控後台：{site}")
         try:
-            req = urllib.request.Request(hook, method="POST", data=json.dumps({"text": "\n".join(lines)}).encode(),
+            req = urllib.request.Request(hook, method="POST", data=json.dumps({"text": chr(10).join(lines)}).encode(),
                                          headers={"Content-Type": "application/json; charset=UTF-8"})
             urllib.request.urlopen(req, timeout=20).read()
+            for d in fresh:  # 推播成功才記「已通知」，失敗下次會再推
+                alerted[d["id"]] = d["reportedAt"]
             log(f"已推播 {len(fresh)} 台")
         except Exception as e:  # 推播失敗不影響後台更新
             log("推播失敗：", type(e).__name__)
-    return alerted
+    # 只保留還在問題清單上的紀錄，避免無限長大
+    live = {d["id"] for d in devices if any(f in d["flags"] for f in ("critical", "night", "persist", "low"))}
+    return {k: v for k, v in alerted.items() if k in live}
 
 
 def main():
