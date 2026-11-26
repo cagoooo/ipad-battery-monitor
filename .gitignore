@@ -8,3 +8,4 @@ prev.json
 __pycache__/
 gas/.clasp.json
 gas/Secret.gs
+site/data.json

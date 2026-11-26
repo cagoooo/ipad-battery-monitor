@@ -68,6 +68,17 @@
     }
   }
 
+  // 學校名稱與門檻數字來自 config.json（由 fetch_jamf.py 寫進 data.json）
+  function applyConfig() {
+    const sc = data.school || {}, th = data.thresholds;
+    document.querySelectorAll('[data-school]').forEach((el) => { if (sc[el.dataset.school]) el.textContent = sc[el.dataset.school]; });
+    if (sc.shortName) document.title = `iPad 電量監控站｜${sc.shortName}${sc.team || ''}`;
+    const hm = (s) => (s ? s.replace(/^0(\d):/, '$1:') : s);
+    const v = { low: th.low, critical: th.critical, lowMinus1: th.low - 1, nightFull: th.nightFull,
+      staleDays: Math.round(th.staleHours / 24), nightStart: hm(th.nightStart), nightEnd: hm(th.nightEnd) };
+    document.querySelectorAll('[data-t]').forEach((el) => { if (v[el.dataset.t] != null) el.textContent = v[el.dataset.t]; });
+  }
+
   function renderStatus() {
     const age = (Date.now() - Date.parse(data.generatedAt)) / 60000;
     $('#status').className = 'status ' + (age < 45 ? 'fresh' : 'old');
@@ -82,18 +93,21 @@
   }
 
   function renderTiles() {
-    const s = data.summary;
+    const s = data.summary, th = data.thresholds;
     const lowAll = data.devices.filter((d) => d.battery != null && d.battery < data.thresholds.low && !d.flags.includes('stale')).length;
     const tiles = [
       { n: s.needCheck, l: '學生機要檢查', sub: '充電車上電量有狀況', c: 'var(--brand)', go: '#todo' },
-      { n: data.devices.filter((d) => d.kind === 'student' && d.flags.includes('critical') && !d.flags.includes('stale')).length, l: '學生機低於 20%', sub: '最優先處理', c: 'var(--crit)', go: '#todo' },
-      { n: data.devices.filter((d) => d.flags.includes('night')).length, l: '半夜沒充飽', sub: '0:00–7:30 回報不到 80%', c: 'var(--night)', go: '#todo' },
-      { n: lowAll, l: '全校低於 50%', sub: `含老師機・共 ${s.total} 台`, c: 'var(--low)', go: '#carts' },
-      { n: s.stale, l: '3 天以上沒回報', sub: '電量資料已過期', c: 'var(--stale)', go: '#staleList' },
+      { n: data.devices.filter((d) => d.kind === 'student' && d.flags.includes('critical') && !d.flags.includes('stale')).length, l: `學生機低於 ${th.critical}%`, sub: '最優先處理', c: 'var(--crit)', go: '#todo' },
+      { n: data.devices.filter((d) => d.flags.includes('night')).length, l: '半夜沒充飽', sub: `${nightRange()} 回報不到 ${th.nightFull}%`, c: 'var(--night)', go: '#todo' },
+      { n: lowAll, l: `全校低於 ${th.low}%`, sub: `含老師機・共 ${s.total} 台`, c: 'var(--low)', go: '#carts' },
+      { n: s.stale, l: `${staleDays()} 天以上沒回報`, sub: '電量資料已過期', c: 'var(--stale)', go: '#staleList' },
     ];
     $('#tiles').innerHTML = tiles.map((t, i) => `<button class="tile" data-go="${t.go}" style="--c:${t.c}"><div class="num">${t.n}</div><div class="lbl">${t.l}</div><small>${t.sub}</small></button>`).join('');
     $('#tiles').querySelectorAll('.tile').forEach((b) => b.addEventListener('click', () => document.querySelector(b.dataset.go).scrollIntoView({ behavior: 'smooth', block: 'start' })));
   }
+
+  const staleDays = () => Math.round(data.thresholds.staleHours / 24);
+  const nightRange = () => `${(data.thresholds.nightStart || '00:00').replace(/^0(\d):/, '$1:')}–${(data.thresholds.nightEnd || '07:30').replace(/^0(\d):/, '$1:')}`;
 
   function renderTodo() {
     let items = todoItems();
@@ -116,7 +130,7 @@
       const k = d.cartLabel; if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(d);
     }
-    const order = ['1、2 年級車', '3 年級車', '4 年級車', '5 年級車', '6 年級車', '第七車（2024 新增）', '英文 1 車', '英文 2 車', '英文 3 車', '老師機', '其他'];
+    const order = data.carts || [];  // 依 config.json 的車子順序排
     const keys = [...groups.keys()].sort((a, b) => (order.indexOf(a) + 99) % 99 - (order.indexOf(b) + 99) % 99);
     $('#carts').innerHTML = keys.map((k) => {
       const list = groups.get(k).sort((a, b) => (a.slot ?? 999) - (b.slot ?? 999) || a.name.localeCompare(b.name));
@@ -133,7 +147,7 @@
   function renderStale() {
     const list = data.devices.filter((d) => d.flags.includes('stale')).sort((a, b) => Date.parse(a.reportedAt || 0) - Date.parse(b.reportedAt || 0));
     $('#staleList').innerHTML = list.length ? list.map((d) => `<button class="stale-item" data-id="${d.id}" type="button">${esc(where(d))}<small>${d.battery ?? '?'}%・${ago(d.reportedAt)}</small></button>`).join('')
-      : '<div class="empty">全部平板 3 天內都有回報 👍</div>';
+      : `<div class="empty">全部平板 ${staleDays()} 天內都有回報 👍</div>`;
   }
 
   function chart(hist) {
@@ -144,8 +158,8 @@
     const y = (v) => H - P - (v / 100) * (H - P * 2);
     const pts = hist.map(([t, v]) => `${x(t).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="電量變化圖">
-      <line x1="${P}" x2="${W - P}" y1="${y(50)}" y2="${y(50)}" stroke="#e8890c" stroke-dasharray="4 4"/>
-      <text x="${P}" y="${y(50) - 4}" font-size="11" fill="#e8890c">50%</text>
+      <line x1="${P}" x2="${W - P}" y1="${y(data.thresholds.low)}" y2="${y(data.thresholds.low)}" stroke="#e8890c" stroke-dasharray="4 4"/>
+      <text x="${P}" y="${y(data.thresholds.low) - 4}" font-size="11" fill="#e8890c">${data.thresholds.low}%</text>
       <line x1="${P}" x2="${W - P}" y1="${y(0)}" y2="${y(0)}" stroke="#ddd"/>
       <line x1="${P}" x2="${W - P}" y1="${y(100)}" y2="${y(100)}" stroke="#eee"/>
       <polyline points="${pts}" fill="none" stroke="#1f6f5c" stroke-width="2.5" stroke-linejoin="round"/>
@@ -156,9 +170,9 @@
   }
 
   function advice(d) {
-    if (d.flags.includes('stale')) return '這台超過 3 天沒回報，電量是舊資料。請找到平板，接上充電線開機並連上 Wi-Fi，回報後就會更新。';
+    if (d.flags.includes('stale')) return `這台超過 ${staleDays()} 天沒回報，電量是舊資料。請找到平板，接上充電線開機並連上 Wi-Fi，回報後就會更新。`;
     if (d.flags.includes('night')) return '這台半夜在充電車上卻沒充飽，最可能是：充電線沒插緊、充電線或接頭壞了、或那一格的插座沒電。可以換一條線試試看。';
-    if (d.flags.includes('persist')) return '連續兩次回報都低於 50% 而且沒有回升，表示它沒有在充電。請檢查充電線是否插好、線材是否損壞。';
+    if (d.flags.includes('persist')) return `連續兩次回報都低於 ${data.thresholds.low}% 而且沒有回升，表示它沒有在充電。請檢查充電線是否插好、線材是否損壞。`;
     if (d.flags.includes('critical')) return '電量非常低，下一堂課可能撐不住。如果它現在在充電車上，請確認充電線有插好（螢幕應該會出現充電閃電符號）。';
     if (d.flags.includes('low')) return '電量偏低。如果剛下課才放回車上是正常的；若放回車上好幾個小時還是偏低，就要檢查充電線。';
     return '電量正常 👍';
@@ -183,7 +197,7 @@
   }
 
   function render() {
-    renderStatus(); renderTiles(); renderTodo(); renderCarts(); renderStale();
+    applyConfig(); renderStatus(); renderTiles(); renderTodo(); renderCarts(); renderStale();
   }
 
   document.addEventListener('click', (e) => {

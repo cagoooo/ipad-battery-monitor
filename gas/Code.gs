@@ -6,7 +6,7 @@
  * GitHub 金鑰存在「指令碼屬性」GITHUB_TOKEN，不寫在程式碼裡。
  * 這把金鑰只有「啟動這個專案自動流程」的權限。
  */
-var REPO = 'cagoooo/ipad-battery-monitor';
+var REPO = 'cagoooo/ipad-battery-monitor';  // 別校請改成「你的 GitHub 帳號/專案名稱」
 var WORKFLOW = 'monitor.yml';
 var EVERY_MINUTES = 15;
 

@@ -9,6 +9,8 @@
   JAMF_SEND_UPDATE_INVENTORY=1           （選填）請所有平板立刻回報最新電量
   JAMF_UPDATE_INTERVAL_MIN=60            （選填）上面的指令多久送一次，預設 60 分鐘
 
+學校名稱、分車規則、判斷門檻都在專案根目錄的 config.json，其他學校只要改那個檔。
+
 輸出的 data.json 只放「裝置名稱、電量、回報時間、機型」，不放序號、IP、UDID 等資訊。
 """
 from __future__ import annotations
@@ -24,29 +26,29 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-TPE = dt.timezone(dt.timedelta(hours=8))
 UTC = dt.timezone.utc
-
-LOW = 50          # 低於這個百分比 → 需要追蹤
-CRITICAL = 20     # 低於這個百分比 → 危險
-NIGHT_FULL = 80   # 半夜還在充電車裡，電量應該要超過這個值
-STALE_HOURS = 72  # 超過這麼久沒回報 → 失聯
-HISTORY_DAYS = 14
 HISTORY_MAX = 80
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 依 Jamf 使用者名稱前綴分車（與 Jamf 智慧群組命名一致）
-CARTS = [
-    ("STU1", "1、2 年級車", "student"),
-    ("STU3", "3 年級車", "student"),
-    ("STU4", "4 年級車", "student"),
-    ("STU5", "5 年級車", "student"),
-    ("STU6", "6 年級車", "student"),
-    ("STU7", "第七車（2024 新增）", "student"),
-    ("ENG1", "英文 1 車", "student"),
-    ("ENG2", "英文 2 車", "student"),
-    ("ENG3", "英文 3 車", "student"),
-    ("TEA", "老師機", "teacher"),
-]
+
+def load_config(path=None):
+    """讀 config.json（學校名稱、分車、門檻），並設定下面會用到的全域值。"""
+    global CFG, TPE, LOW, CRITICAL, NIGHT_FULL, STALE_HOURS, HISTORY_DAYS, NIGHT_START, NIGHT_END, CARTS, OTHER
+    CFG = json.load(open(path or os.path.join(ROOT, "config.json"), encoding="utf-8"))
+    th = CFG.get("thresholds", {})
+    LOW = th.get("low", 50)                  # 低於這個百分比 → 需要追蹤
+    CRITICAL = th.get("critical", 20)        # 低於這個百分比 → 危險
+    NIGHT_FULL = th.get("nightFull", 80)     # 半夜還在充電車裡，電量應該要超過這個值
+    STALE_HOURS = th.get("staleHours", 72)   # 超過這麼久沒回報 → 失聯
+    HISTORY_DAYS = CFG.get("historyDays", 14)
+    TPE = dt.timezone(dt.timedelta(hours=CFG.get("utcOffsetHours", 8)))  # 學校所在時區
+    hm = lambda s: tuple(int(x) for x in s.split(":"))
+    NIGHT_START = hm(CFG.get("night", {}).get("start", "00:00"))
+    NIGHT_END = hm(CFG.get("night", {}).get("end", "07:30"))
+    # 依 Jamf 使用者名稱（或裝置名稱）裡的代號分車
+    CARTS = [(c["prefix"].upper(), c["label"], c.get("kind", "student")) for c in CFG.get("carts", [])]
+    OTHER = CFG.get("otherLabel", "其他")
+    return CFG
 
 
 def log(*a):
@@ -121,12 +123,14 @@ def classify(username: str, name: str):
         if re.search(rf"(^|[-_]){prefix}[-_]", key) or key.startswith(prefix + "-"):
             m = re.search(r"-(\d+)\s*$", key)
             return prefix, label, kind, (int(m.group(1)) if m else None)
-    return "OTHER", "其他", "other", None
+    return "OTHER", OTHER, "other", None
 
 
 def is_night(t: dt.datetime):
-    local = t.astimezone(TPE)
-    return local.hour < 7 or (local.hour == 7 and local.minute < 30)
+    hm = t.astimezone(TPE).timetuple()[3:5]
+    if NIGHT_START <= NIGHT_END:
+        return NIGHT_START <= hm < NIGHT_END
+    return hm >= NIGHT_START or hm < NIGHT_END  # 例如 22:00～06:00 跨過午夜
 
 
 def build(devs, prev, now):
@@ -158,7 +162,7 @@ def build(devs, prev, now):
         if age_h is None or age_h > STALE_HOURS:
             flags.append("stale")
         if kind == "student":
-            # 半夜（00:00–07:30）回報時電量還不到 80% → 很可能整晚沒充到電
+            # 半夜（預設 00:00–07:30）回報時電量還不到 80% → 很可能整晚沒充到電
             recent_night = [p for p in hist if is_night(parse_time(p[0]))
                             and (now - parse_time(p[0])).total_seconds() < 20 * 3600]
             # 但之後若已回升到 80% 以上，就代表其實有在充，不必再追
@@ -227,7 +231,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--prev", default="prev.json")
     ap.add_argument("--out", default="site/data.json")
+    ap.add_argument("--config", default=None, help="預設是專案根目錄的 config.json")
     a = ap.parse_args()
+    load_config(a.config)
     try:
         prev = json.load(open(a.prev, encoding="utf-8"))
     except Exception:
@@ -260,7 +266,10 @@ def main():
     devices = build(devs, prev, now)
     data = {
         "generatedAt": iso(now),
-        "thresholds": {"low": LOW, "critical": CRITICAL, "nightFull": NIGHT_FULL, "staleHours": STALE_HOURS},
+        "school": CFG.get("school", {}),
+        "thresholds": {"low": LOW, "critical": CRITICAL, "nightFull": NIGHT_FULL, "staleHours": STALE_HOURS,
+                       "nightStart": "%02d:%02d" % NIGHT_START, "nightEnd": "%02d:%02d" % NIGHT_END},
+        "carts": [label for _, label, _ in CARTS] + [OTHER],
         "summary": summarize(devices),
         "devices": devices,
         "alerted": notify(devices, prev, now),
