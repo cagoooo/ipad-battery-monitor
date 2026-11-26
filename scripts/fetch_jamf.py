@@ -6,7 +6,8 @@
   JAMF_CLIENT_ID / JAMF_CLIENT_SECRET   （建議：Jamf「API 角色與用戶端」建立的唯讀用戶端）
   或 JAMF_USER / JAMF_PASSWORD           （沒有用戶端時退而使用帳號密碼）
   GCHAT_WEBHOOK          （選填）Google Chat 聊天室的 Webhook 網址，有新問題時推播
-  JAMF_SEND_UPDATE_INVENTORY=1           （選填）順便請所有平板立刻回報最新電量
+  JAMF_SEND_UPDATE_INVENTORY=1           （選填）請所有平板立刻回報最新電量
+  JAMF_UPDATE_INTERVAL_MIN=60            （選填）上面的指令多久送一次，預設 60 分鐘
 
 輸出的 data.json 只放「裝置名稱、電量、回報時間、機型」，不放序號、IP、UDID 等資訊。
 """
@@ -57,10 +58,12 @@ class Jamf:
         self.base = base.rstrip("/")
         self.token = None
 
-    def _req(self, method, path, headers=None, data=None, timeout=60):
+    def _req(self, method, path, headers=None, data=None, timeout=60, raw=False):
         r = urllib.request.Request(self.base + path, method=method, headers=headers or {}, data=data)
         with urllib.request.urlopen(r, timeout=timeout) as resp:
             body = resp.read()
+            if raw:
+                return body
             return json.loads(body) if body else None
 
     def login(self):
@@ -80,8 +83,8 @@ class Jamf:
     def get(self, path):
         return self._req("GET", path, {"Authorization": "Bearer " + self.token, "Accept": "application/json"})
 
-    def post(self, path):
-        return self._req("POST", path, {"Authorization": "Bearer " + self.token, "Accept": "application/json"}, b"")
+    def post(self, path, raw=False):
+        return self._req("POST", path, {"Authorization": "Bearer " + self.token, "Accept": "application/json"}, b"", raw=raw)
 
     def logout(self):
         try:
@@ -236,13 +239,23 @@ def main():
     try:
         jamf.login()
         devs = jamf.mobile_devices()
+        last_cmd = parse_time(prev.get("inventoryCommandAt"))
+        interval = float(os.environ.get("JAMF_UPDATE_INTERVAL_MIN") or 60)
         if os.environ.get("JAMF_SEND_UPDATE_INVENTORY") == "1":
-            ids = ",".join(str(d["mobileDeviceId"]) for d in devs)
-            try:
-                jamf.post(f"/JSSResource/mobiledevicecommands/command/UpdateInventory/id/{ids}")
-                log("已請平板回報最新電量")
-            except urllib.error.HTTPError as e:
-                log("送出更新電量指令失敗：", e.code)
+            # 排程每 15 分鐘跑一次，但「請平板回報」只照設定的間隔送（預設每小時一次）；
+            # 留 5 分鐘緩衝，避免 GitHub 排程延遲造成整整跳過一小時
+            if last_cmd is None or (now - last_cmd).total_seconds() >= (interval - 5) * 60:
+                ids = ",".join(str(d["mobileDeviceId"]) for d in devs if (d.get("general") or {}).get("managed"))
+                try:
+                    jamf.post(f"/JSSResource/mobiledevicecommands/command/UpdateInventory/id/{ids}", raw=True)
+                    last_cmd = now
+                    log(f"已請 {ids.count(',') + 1} 台平板回報最新電量")
+                except urllib.error.HTTPError as e:
+                    log("送出更新電量指令失敗：", e.code)
+                except Exception as e:
+                    log("送出更新電量指令失敗：", type(e).__name__)
+            else:
+                log(f"距上次請平板回報不到 {interval:.0f} 分鐘，這次略過")
     finally:
         jamf.logout()
 
@@ -253,6 +266,7 @@ def main():
         "summary": summarize(devices),
         "devices": devices,
         "alerted": notify(devices, prev, now),
+        "inventoryCommandAt": iso(last_cmd),
     }
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:

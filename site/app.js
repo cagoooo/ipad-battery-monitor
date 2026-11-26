@@ -71,7 +71,7 @@
   function renderStatus() {
     const age = (Date.now() - Date.parse(data.generatedAt)) / 60000;
     $('#status').className = 'status ' + (age < 45 ? 'fresh' : 'old');
-    $('#statusText').textContent = `資料更新於 ${when(data.generatedAt)}（${ago(data.generatedAt)}）${age >= 45 ? '・自動更新可能延遲' : ''}`;
+    $('#statusText').textContent = `資料更新於 ${when(data.generatedAt)}（${ago(data.generatedAt)}）${data.inventoryCommandAt ? `・${ago(data.inventoryCommandAt)}已請平板回報` : ''}${age >= 45 ? '・自動更新可能延遲' : ''}`;
   }
 
   function todoItems() {

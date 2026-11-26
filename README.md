@@ -26,7 +26,7 @@
 | `JAMF_USER` / `JAMF_PASSWORD` | 沒有用戶端時使用的帳號密碼 |
 | `GCHAT_WEBHOOK` | 選填：Google Chat 聊天室 Webhook，新發現問題時推播 |
 
-選填變數（Repository variables）：`JAMF_SEND_UPDATE_INVENTORY=1` 會在每次抓取時請所有平板立刻回報最新電量。
+設定變數（Repository variables）：`JAMF_SEND_UPDATE_INVENTORY=1`（已開啟）請所有平板立刻回報最新電量，`JAMF_UPDATE_INTERVAL_MIN` 控制多久送一次（預設 60 分鐘，上次送出時間記在 data.json 的 `inventoryCommandAt`）。
 
 ---
 

@@ -45,6 +45,7 @@ jobs:
           JAMF_CLIENT_SECRET: ${{ secrets.JAMF_CLIENT_SECRET }}
           GCHAT_WEBHOOK: ${{ secrets.GCHAT_WEBHOOK }}
           JAMF_SEND_UPDATE_INVENTORY: ${{ vars.JAMF_SEND_UPDATE_INVENTORY }}
+          JAMF_UPDATE_INTERVAL_MIN: ${{ vars.JAMF_UPDATE_INTERVAL_MIN }}
           SITE_URL: https://cagoooo.github.io/ipad-battery-monitor/
         run: python scripts/fetch_jamf.py --prev prev.json --out site/data.json
 

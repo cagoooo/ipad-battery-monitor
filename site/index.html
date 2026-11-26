@@ -74,7 +74,7 @@
     <h2>📘 這個監控站怎麼運作？</h2>
     <ol>
       <li><strong>每 15 分鐘自動抓一次</strong>：系統自動登入 Jamf，讀取全校平板的最新電量，不用再每天手動登入查。</li>
-      <li><strong>電量是「平板上次回報」的數字</strong>：平板大約每天回報 Jamf 一次，所以每台平板都會標示「多久前回報」，時間越久越不準。</li>
+      <li><strong>每小時請平板主動回報一次</strong>：系統每小時會請所有平板馬上回報電量；有開機、連上 Wi-Fi 的平板幾分鐘內就會更新。關機、沒連網的平板回報不了，所以每台都會標示「多久前回報」，時間越久越不準。</li>
       <li><strong>怎樣算有問題</strong>：低於 50% 要追蹤、低於 20% 是危險；學生車的平板如果半夜（0:00–7:30）回報時還不到 80%，或連續兩次回報都低於 50% 沒回升，很可能是充電線出問題。</li>
       <li><strong>不會放個人資料</strong>：這個頁面只顯示平板編號、電量與回報時間，不顯示序號、網路位址等資訊。</li>
     </ol>
@@ -102,7 +102,7 @@
     <p class="site-credit">Made with <span class="site-credit__heart" aria-label="愛心">❤️</span> by
       <a href="https://cagoooo.github.io/Akai/" target="_blank" rel="noopener noreferrer" class="site-credit__author">阿凱老師</a>
       <span class="footer-school"><span class="footer-dot" aria-hidden="true">・</span>桃園市龍潭區石門國民小學</span></p>
-    <p class="version-tag">v1.0.0</p>
+    <p class="version-tag">v1.1.0</p>
   </div>
 </footer>
 
