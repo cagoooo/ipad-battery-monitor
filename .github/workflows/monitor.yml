@@ -1,0 +1,68 @@
+name: iPad 電量監控（每 15 分鐘）
+
+on:
+  schedule:
+    # GitHub 整點最塞，故意錯開分鐘數（UTC 時間，全天都跑）
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["site/**", "scripts/**", ".github/workflows/monitor.yml"]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 取回上一次的資料（用來累積電量紀錄）
+        run: |
+          curl -fsSL --max-time 30 "https://cagoooo.github.io/ipad-battery-monitor/data.json?t=$(date +%s)" -o prev.json || echo '{}' > prev.json
+
+      - name: 從 Jamf 抓最新電量
+        env:
+          JAMF_URL: ${{ secrets.JAMF_URL }}
+          JAMF_USER: ${{ secrets.JAMF_USER }}
+          JAMF_PASSWORD: ${{ secrets.JAMF_PASSWORD }}
+          JAMF_CLIENT_ID: ${{ secrets.JAMF_CLIENT_ID }}
+          JAMF_CLIENT_SECRET: ${{ secrets.JAMF_CLIENT_SECRET }}
+          GCHAT_WEBHOOK: ${{ secrets.GCHAT_WEBHOOK }}
+          JAMF_SEND_UPDATE_INVENTORY: ${{ vars.JAMF_SEND_UPDATE_INVENTORY }}
+          SITE_URL: https://cagoooo.github.io/ipad-battery-monitor/
+        run: python scripts/fetch_jamf.py --prev prev.json --out site/data.json
+
+      - name: 保持排程不被停用（超過 30 天沒更新就提交一次）
+        run: |
+          last=$(git log -1 --format=%ct)
+          if [ $(( $(date +%s) - last )) -gt 2592000 ]; then
+            date -u +%FT%TZ > .github/keepalive
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/keepalive
+            git commit -m "chore: 保持排程啟用"
+            git push
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
