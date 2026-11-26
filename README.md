@@ -5,6 +5,7 @@
 - 正式網址：https://cagoooo.github.io/ipad-battery-monitor/
 - 抓資料：`scripts/fetch_jamf.py`（只用 Python 標準函式庫）
 - 排程與部署：`.github/workflows/monitor.yml`（GitHub Actions → GitHub Pages）
+- 鬧鐘：`gas/Code.gs`（學校帳號的 Apps Script「iPad 電量監控站鬧鐘」，每 15 分鐘用唯一權限的 GitHub 金鑰觸發上面的流程；GitHub 內建排程常延遲數小時，只當備援）
 - 網頁：`site/`（純 HTML／CSS／JS，讀 `data.json`）
 
 ## 判斷規則
