@@ -168,12 +168,15 @@ def build(devs, prev, now):
             # 但之後若已回升到 80% 以上，就代表其實有在充，不必再追
             if recent_night and recent_night[-1][1] < NIGHT_FULL and hist[-1][1] < NIGHT_FULL:
                 flags.append("night")
-            # 連續兩次回報（相隔 2 小時以上）都低於 50%，而且沒有回升
+            # 跟「至少 2 小時前」的那次回報比：兩次都低於 50%，而且沒有回升
+            # （平板每小時回報一次，只比相鄰兩次的話永遠湊不到 2 小時）
             if len(hist) >= 2:
-                (t1, b1), (t2, b2) = hist[-2], hist[-1]
-                gap = (parse_time(t2) - parse_time(t1)).total_seconds() / 3600
-                if b1 < LOW and b2 < LOW and b2 <= b1 + 2 and gap >= 2:
-                    flags.append("persist")
+                t2, b2 = parse_time(hist[-1][0]), hist[-1][1]
+                older = [p for p in hist[:-1] if (t2 - parse_time(p[0])).total_seconds() >= 2 * 3600]
+                if older:
+                    b1 = older[-1][1]
+                    if b1 < LOW and b2 < LOW and b2 <= b1 + 2:
+                        flags.append("persist")
         trend = None
         if len(hist) >= 2:
             trend = hist[-1][1] - hist[-2][1]
@@ -196,14 +199,35 @@ def summarize(devices):
     return s
 
 
+ALERT_FLAGS = ("critical", "night", "persist")
+
+
 def notify(devices, prev, now):
-    """有新出現的問題才推播；同一台同一次回報只通知一次。"""
+    """同一台平板出現「新的」問題標記才推播。
+
+    alerted 記的是每台「已經通知過的標記」，例如 {"123": "critical,night"}。
+    平板每小時回報一次也不會重複通知；某個標記解除後又出現，才會再通知。
+    """
     hook = os.environ.get("GCHAT_WEBHOOK")
-    alerted = dict(prev.get("alerted", {}))
-    fresh = [d for d in devices
-             if d["kind"] == "student" and d["reportedAt"] and "stale" not in d["flags"]
-             and any(f in d["flags"] for f in ("critical", "night", "persist"))
-             and alerted.get(d["id"]) != d["reportedAt"]]
+    by_id = {d["id"]: d for d in devices}
+    known = {}
+    for k, v in prev.get("alerted", {}).items():
+        d = by_id.get(k)
+        if not d:
+            continue
+        cur = {f for f in d["flags"] if f in ALERT_FLAGS}
+        if re.match(r"\d{4}-", str(v)):
+            # 舊格式（記回報時間）：當作現在的標記都通知過了，避免改版後一次重推；
+            # 「連續低電量」是這版才修好的判斷，第一次出現仍要通知
+            known[k] = cur - {"persist"}
+        else:
+            known[k] = set(filter(None, str(v).split(","))) & cur  # 已解除的標記拿掉，之後再出現會再通知
+    fresh = []
+    for d in devices:
+        cur = {f for f in d["flags"] if f in ALERT_FLAGS}
+        if (d["kind"] == "student" and d["reportedAt"] and "stale" not in d["flags"]
+                and cur - known.get(d["id"], set())):
+            fresh.append(d)
     if hook and fresh:
         reason = {"critical": "電量危險", "night": "半夜沒充飽", "persist": "連續低電量"}
         lines = [f"🔋 *平板電量警示*（{now.astimezone(TPE):%m/%d %H:%M}）新發現 {len(fresh)} 台需要檢查充電線："]
@@ -218,13 +242,12 @@ def notify(devices, prev, now):
                                          headers={"Content-Type": "application/json; charset=UTF-8"})
             urllib.request.urlopen(req, timeout=20).read()
             for d in fresh:  # 推播成功才記「已通知」，失敗下次會再推
-                alerted[d["id"]] = d["reportedAt"]
+                known[d["id"]] = known.get(d["id"], set()) | {f for f in d["flags"] if f in ALERT_FLAGS}
             log(f"已推播 {len(fresh)} 台")
         except Exception as e:  # 推播失敗不影響後台更新
             log("推播失敗：", type(e).__name__)
-    # 只保留還在問題清單上的紀錄，避免無限長大
-    live = {d["id"] for d in devices if any(f in d["flags"] for f in ("critical", "night", "persist", "low"))}
-    return {k: v for k, v in alerted.items() if k in live}
+    # 只保留還有問題標記的平板，避免紀錄無限長大
+    return {k: ",".join(sorted(v)) for k, v in known.items() if v}
 
 
 def main():
