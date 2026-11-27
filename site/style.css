@@ -177,7 +177,44 @@ main { padding: clamp(16px, 2vw, 28px) 0 40px; display: grid; gap: clamp(16px, 2
   .top { position: static; }
   .slots { grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); }
 }
-@media print { .site-footer, .top .status, .controls { display: none; } }
+/* 列印巡車單：螢幕上不顯示，列印時只印這一份 */
+.print-sheet { display: none; }
+@media print {
+  @page { size: A4 portrait; margin: 10mm; }
+  body { background: #fff !important; }
+  body > *:not(#printSheet) { display: none !important; }
+  .print-sheet { display: block; color: #000; font-size: 11pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .ps-head h1 { font-size: 20pt; margin: 0 0 2mm; }
+  .ps-head p { margin: 0 0 3mm; font-size: 10pt; color: #333; }
+  .print-sheet h2 { font-size: 13pt; margin: 4mm 0 2mm; border-left: 4px solid #1f6f5c; padding-left: 3mm; }
+  .ps-break { break-before: page; }
+  .ps-legend { display: flex; flex-wrap: wrap; gap: 2mm 5mm; font-size: 9pt; margin-bottom: 2mm; }
+  .ps-legend i { display: inline-block; width: 4mm; height: 4mm; border-radius: 1mm; margin-right: 1mm; vertical-align: -0.6mm; border: 1px solid #555; }
+  .ps-ok { background: #d7f0df; } .ps-low { background: #ffe2b8; } .ps-crit { background: #f9c9c2; } .ps-stale { background: #e6e8ea; }
+  .ps-key { flex-basis: 100%; color: #333; }
+  .ps-table { width: 100%; border-collapse: collapse; font-size: 10pt; }
+  .ps-table th, .ps-table td { border: 1px solid #555; padding: 1.5mm 2mm; text-align: left; vertical-align: middle; }
+  .ps-table th { background: #e9f3ef; }
+  .ps-table tr { break-inside: avoid; }
+  .ps-where b { display: block; font-size: 15pt; }
+  .ps-num { font-size: 13pt; font-weight: 700; white-space: nowrap; }
+  .ps-small { font-size: 8.5pt; color: #333; }
+  .ps-checks { font-size: 9.5pt; line-height: 1.7; white-space: nowrap; }
+  .ps-note, .ps-empty, .ps-foot { font-size: 9.5pt; color: #333; }
+  .ps-carts { display: grid; grid-template-columns: 1fr; gap: 4mm; }
+  .ps-cart { break-inside: avoid; border: 1px solid #999; border-radius: 2mm; padding: 2mm 3mm 3mm; }
+  .ps-cart h3 { font-size: 12pt; margin: 0 0 2mm; }
+  .ps-cart h3 small { font-size: 9pt; font-weight: 400; margin-left: 3mm; color: #333; }
+  .ps-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 1.5mm; }
+  .ps-slot { position: relative; border: 1px solid #888; border-radius: 1.5mm; padding: 1mm 0.5mm; text-align: center; line-height: 1.15; min-height: 12mm; }
+  .ps-slot .n { display: block; font-size: 11pt; font-weight: 800; }
+  .ps-slot .v { display: block; font-size: 8.5pt; }
+  .ps-slot .m { display: block; font-size: 8.5pt; font-weight: 800; letter-spacing: 0.5px; }
+  .ps-slot .box { position: absolute; top: 0.3mm; right: 0.8mm; font-size: 9pt; }
+  .ps-slot.ok { background: #d7f0df; } .ps-slot.low { background: #ffe2b8; } .ps-slot.crit { background: #f9c9c2; }
+  .ps-slot.stale { background: #e6e8ea; border-style: dashed; color: #555; }
+  .ps-slot.flag { border: 2.5px solid #000; }
+}
 
 /* 新版本通知列 */
 .update-bar {

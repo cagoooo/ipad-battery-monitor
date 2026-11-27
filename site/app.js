@@ -4,7 +4,7 @@
   const DONE_KEY = 'ipadBatt.done.v1';
   const PREF_KEY = 'ipadBatt.pref.v1';
   const REFRESH_MS = 5 * 60 * 1000;
-  const APP_VERSION = '1.3.0'; // 改版時同步改 sw.js、version.json、index.html 的 ?v=
+  const APP_VERSION = '1.4.0'; // 改版時同步改 sw.js、version.json、index.html 的 ?v=
   const FLAG = {
     critical: { t: '電量危險', c: 'var(--crit)' },
     low: { t: '電量偏低', c: 'var(--low)' },
@@ -222,6 +222,77 @@
     const text = items.length ? [`iPad 電量待檢查（${when(data.generatedAt)}）`, ...items.map((d) => `・${where(d)}：${d.battery}%（${d.flags.filter((f) => FLAG[f]).map((f) => FLAG[f].t).join('、')}）`)].join('\n') : '目前沒有需要檢查的平板';
     try { await navigator.clipboard.writeText(text); toast(`已複製 ${items.length} 台的清單，可以貼到 LINE`); } catch { toast('複製失敗，請手動選取'); }
   });
+
+  // ── 列印巡車單 ──────────────────────────────────────────
+  // 黑白印表機也看得懂：除了顏色，每格再用一個字標問題（危／低／夜／續／久）
+  const MARK = { critical: '危', low: '低', night: '夜', persist: '續', stale: '久' };
+  const isProblem = (d) => !d.flags.includes('stale') && d.flags.some((f) => PROBLEM.includes(f));
+  const slotNo = (d) => (d.slot != null ? String(d.slot).padStart(2, '0') : '—');
+  const marks = (d) => (d.flags.includes('stale') ? ['stale'] : d.flags.filter((f) => MARK[f])).map((f) => MARK[f]).join('');
+  const cartIndex = (label) => { const i = (data.carts || []).indexOf(label); return i < 0 ? 999 : i; };
+
+  function cartGroups() {
+    const groups = new Map();
+    for (const d of data.devices) {
+      if (!groups.has(d.cartLabel)) groups.set(d.cartLabel, []);
+      groups.get(d.cartLabel).push(d);
+    }
+    return [...groups.keys()]
+      .sort((a, b) => cartIndex(a) - cartIndex(b))
+      .map((k) => [k, groups.get(k).sort((a, b) => (a.slot ?? 999) - (b.slot ?? 999) || a.name.localeCompare(b.name))]);
+  }
+
+  function buildPrintSheet() {
+    if (!data) return;
+    const th = data.thresholds;
+    const school = (data.school && data.school.shortName) || '';
+    const now = new Date().toLocaleString('zh-TW', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const todo = data.devices.filter((d) => d.kind === 'student' && isProblem(d))
+      .sort((a, b) => cartIndex(a.cartLabel) - cartIndex(b.cartLabel) || (a.slot ?? 999) - (b.slot ?? 999));
+    const legend = `<div class="ps-legend">
+      <span><i class="ps-ok"></i>${th.low}% 以上</span><span><i class="ps-low"></i>${th.critical}–${th.low - 1}%</span>
+      <span><i class="ps-crit"></i>低於 ${th.critical}%</span><span><i class="ps-stale"></i>${staleDays()} 天以上沒回報</span>
+      <span class="ps-key">粗框＋□＝要檢查　危＝低於 ${th.critical}%　低＝低於 ${th.low}%　夜＝半夜沒充飽　續＝連續低電量　久＝很久沒回報</span></div>`;
+    const rows = todo.map((d) => `<tr>
+      <td class="ps-where">${esc(d.cartLabel)}<b>${slotNo(d)} 號</b></td>
+      <td class="ps-num">${d.battery ?? '?'}%</td>
+      <td>${d.flags.filter((f) => FLAG[f] && f !== 'stale').map((f) => FLAG[f].t).join('、')}</td>
+      <td class="ps-small">${esc(d.name)}<br>${when(d.reportedAt)} 回報</td>
+      <td class="ps-checks">□ 換線後會充　□ 換一格會充<br>□ 平板充電孔　□ 其他：＿＿＿＿</td></tr>`).join('');
+    const carts = cartGroups().map(([label, list]) => {
+      const bad = list.filter(isProblem).length;
+      const stale = list.filter((d) => d.flags.includes('stale')).length;
+      const cells = list.map((d) => {
+        let cls;
+        if (d.flags.includes('stale')) cls = 'stale';
+        else if (d.flags.includes('critical')) cls = 'crit';
+        else if ((d.battery ?? 0) < th.low) cls = 'low';
+        else cls = 'ok';
+        if (isProblem(d)) cls += ' flag';
+        return `<div class="ps-slot ${cls}"><span class="n">${slotNo(d)}</span><span class="v">${d.battery ?? '?'}%</span><span class="m">${marks(d) || '&nbsp;'}</span>${isProblem(d) ? '<span class="box">□</span>' : ''}</div>`;
+      }).join('');
+      return `<section class="ps-cart"><h3>${esc(label)}<small>${list.length} 台${bad ? `・要檢查 ${bad} 台` : '・正常'}${stale ? `・沒回報 ${stale} 台` : ''}</small></h3><div class="ps-grid">${cells}</div></section>`;
+    }).join('');
+    const staleCount = data.devices.filter((d) => d.kind === 'student' && d.flags.includes('stale')).length;
+    $('#printSheet').innerHTML = `
+      <header class="ps-head"><h1>🔌 iPad 充電車巡車單</h1>
+        <p>${esc(school)}・資料時間 ${when(data.generatedAt)}・列印時間 ${now}・學生機要檢查 ${todo.length} 台</p></header>
+      ${legend}
+      <h2>一、今天要去檢查的平板（${todo.length} 台）</h2>
+      ${todo.length ? `<table class="ps-table"><thead><tr><th>車／號碼</th><th>電量</th><th>問題</th><th>裝置名稱／回報時間</th><th>現場檢查結果</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="ps-empty">目前沒有需要檢查的平板 🎉</p>'}
+      ${staleCount ? `<p class="ps-note">另有 ${staleCount} 台學生機 ${staleDays()} 天以上沒回報（可能沒開機、沒連上 Wi-Fi 或不在車上），格子圖中以「久」與虛線框標示，可以順便確認。</p>` : ''}
+      <h2 class="ps-break">二、各充電車格子圖（號碼＝平板編號）</h2>
+      ${legend}
+      <div class="ps-carts">${carts}</div>
+      <p class="ps-foot">印出後電量仍會變動，以現場平板右上角的電量為準；修好的平板當晚充飽後，網頁上的標記會自動消失。</p>`;
+  }
+
+  $('#printSheetBtn').addEventListener('click', () => {
+    if (!data) { toast('資料還在讀取，請稍候再試'); return; }
+    buildPrintSheet();
+    window.print();
+  });
+  window.addEventListener('beforeprint', buildPrintSheet); // 直接按 Ctrl+P 也印巡車單
 
   // ── 新版本通知 ──────────────────────────────────────────
   // 用 version.json 當「閘門」：版本號真的不一樣才提示，避免假更新一直跳。
