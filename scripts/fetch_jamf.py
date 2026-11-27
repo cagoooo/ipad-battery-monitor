@@ -158,6 +158,19 @@ def night_date(t: dt.datetime):
     return local.strftime("%Y-%m-%d")
 
 
+def charged_since(hist, since_iso, rise=2):
+    """從某次回報之後，電量有沒有比途中最低點高出 rise% 以上（代表有接上充電）。"""
+    t0 = parse_time(since_iso)
+    low = None
+    for t, b in hist:
+        if parse_time(t) < t0:
+            continue
+        if low is not None and b >= low + rise:
+            return True
+        low = b if low is None else min(low, b)
+    return False
+
+
 def build(devs, prev, now):
     prev_by_id = {str(d["id"]): d for d in prev.get("devices", [])}
     cutoff = now - dt.timedelta(days=HISTORY_DAYS)
@@ -193,8 +206,9 @@ def build(devs, prev, now):
             # 半夜（預設 00:00–07:30）回報時電量還不到 80% → 很可能整晚沒充到電
             recent_night = [p for p in hist if is_night(parse_time(p[0]))
                             and (now - parse_time(p[0])).total_seconds() < 20 * 3600]
-            # 但之後若已回升到 80% 以上，就代表其實有在充，不必再追
-            if recent_night and recent_night[-1][1] < NIGHT_FULL and hist[-1][1] < NIGHT_FULL:
+            # 但之後若已回升到 80% 以上，或半夜之後電量開始往上升（線重新插好、有在充），就不必再追
+            if recent_night and recent_night[-1][1] < NIGHT_FULL and hist[-1][1] < NIGHT_FULL \
+                    and not charged_since(hist, recent_night[-1][0]):
                 flags.append("night")
                 night_of = night_date(parse_time(recent_night[-1][0]))
             # 跟「至少 2 小時前」的那次回報比：兩次都低於 50%，而且沒有回升
