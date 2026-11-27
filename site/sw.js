@@ -3,7 +3,7 @@
  * 策略：網頁與程式「網路優先、斷線才用快取」；data.json、version.json 一律直接上網拿，不快取。
  * 新版 Service Worker 裝好後先等待，使用者按「立即更新」才接手（避免畫面用到一半被換掉）。
  */
-const VERSION = '1.4.1';
+const VERSION = '1.4.2';
 const CACHE = `ipad-monitor-v${VERSION}`;
 const SHELL = [
   './',

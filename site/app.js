@@ -4,7 +4,7 @@
   const DONE_KEY = 'ipadBatt.done.v1';
   const PREF_KEY = 'ipadBatt.pref.v1';
   const REFRESH_MS = 5 * 60 * 1000;
-  const APP_VERSION = '1.4.1'; // 改版時同步改 sw.js、version.json、index.html 的 ?v=
+  const APP_VERSION = '1.4.2'; // 改版時同步改 sw.js、version.json、index.html 的 ?v=
   const FLAG = {
     critical: { t: '電量危險', c: 'var(--crit)' },
     low: { t: '電量偏低', c: 'var(--low)' },
@@ -41,7 +41,13 @@
     if (!iso) return '—';
     return new Date(iso).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
   }
-  const where = (d) => d.kind === 'other' ? d.name : `${d.cartLabel}${d.slot != null ? ` ${String(d.slot).padStart(2, '0')} 號` : ''}`;
+  // 格號：名稱最後是「數字-數字」時（例：TEA-1-30）顯示 1-30，避免幾台都顯示成 30 分不出來
+  const slotNo = (d) => {
+    if (d.slot == null) return '—';
+    const m = /(?:^|[-_])(\d+)[-_](\d+)$/.exec(d.name || '');
+    return m && Number(m[2]) === d.slot ? `${Number(m[1])}-${String(d.slot).padStart(2, '0')}` : String(d.slot).padStart(2, '0');
+  };
+  const where = (d) => d.kind === 'other' ? d.name : `${d.cartLabel}${d.slot != null ? ` ${slotNo(d)} 號` : ''}`;
   const doneKey = (d) => `${d.id}@${d.reportedAt}`;
   const isDone = (d) => !!done[doneKey(d)];
   const batt = (d) => `<span class="batt" style="--c:${color(d)};--p:${d.battery ?? 0}"><span>${d.battery ?? '?'}%</span></span>`;
@@ -141,7 +147,7 @@
         <span class="sum">${list.length} 台${bad ? `・<b>${bad} 台要注意</b>` : '・正常'}${stale ? `・${stale} 台沒回報` : ''}</span></div>
         <div class="slots">${list.map((d) => `<button class="slot ${d.flags.includes('stale') ? 'stale' : ''} ${!d.flags.includes('stale') && d.flags.some((f) => PROBLEM.includes(f)) ? 'flag' : ''}"
           style="--c:${color(d)};--p:${d.battery ?? 0};--o:${d.flags.includes('night') || d.flags.includes('persist') ? 'var(--night)' : color(d)}" data-id="${d.id}" type="button" title="${esc(d.name)}：${d.battery ?? '?'}%（${ago(d.reportedAt)}回報）">
-          <span class="n">${d.slot != null ? String(d.slot).padStart(2, '0') : '—'}</span><span class="v">${d.battery ?? '?'}</span></button>`).join('')}</div></div>`;
+          <span class="n">${slotNo(d)}</span><span class="v">${d.battery ?? '?'}</span></button>`).join('')}</div></div>`;
     }).join('');
   }
 
@@ -235,7 +241,6 @@
   // 黑白印表機也看得懂：除了顏色，每格再用一個字標問題（危／低／夜／續／久）
   const MARK = { critical: '危', low: '低', night: '夜', persist: '續', stale: '久' };
   const isProblem = (d) => !d.flags.includes('stale') && d.flags.some((f) => PROBLEM.includes(f));
-  const slotNo = (d) => (d.slot != null ? String(d.slot).padStart(2, '0') : '—');
   const marks = (d) => (d.flags.includes('stale') ? ['stale'] : d.flags.filter((f) => MARK[f])).map((f) => MARK[f]).join('');
   const cartIndex = (label) => { const i = (data.carts || []).indexOf(label); return i < 0 ? 999 : i; };
 
