@@ -122,7 +122,8 @@ main { padding: clamp(16px, 2vw, 28px) 0 40px; display: grid; gap: clamp(16px, 2
 .slot:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
 
 /* 失聯清單 */
-.stale-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.stale-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 14px; align-items: start; }
+.stale-items { display: flex; flex-wrap: wrap; gap: 8px; }
 .stale-item { border: 1px solid var(--line); background: #f7f7f5; border-radius: 999px; padding: 6px 14px; font-size: var(--fs-sm); color: var(--ink); }
 .stale-item small { color: var(--muted); margin-left: 6px; }
 

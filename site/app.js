@@ -4,7 +4,7 @@
   const DONE_KEY = 'ipadBatt.done.v1';
   const PREF_KEY = 'ipadBatt.pref.v1';
   const REFRESH_MS = 5 * 60 * 1000;
-  const APP_VERSION = '1.4.0'; // 改版時同步改 sw.js、version.json、index.html 的 ?v=
+  const APP_VERSION = '1.4.1'; // 改版時同步改 sw.js、version.json、index.html 的 ?v=
   const FLAG = {
     critical: { t: '電量危險', c: 'var(--crit)' },
     low: { t: '電量偏低', c: 'var(--low)' },
@@ -146,9 +146,17 @@
   }
 
   function renderStale() {
-    const list = data.devices.filter((d) => d.flags.includes('stale')).sort((a, b) => Date.parse(a.reportedAt || 0) - Date.parse(b.reportedAt || 0));
-    $('#staleList').innerHTML = list.length ? list.map((d) => `<button class="stale-item" data-id="${d.id}" type="button">${esc(where(d))}<small>${d.battery ?? '?'}%・${ago(d.reportedAt)}</small></button>`).join('')
-      : `<div class="empty">全部平板 ${staleDays()} 天內都有回報 👍</div>`;
+    const all = data.devices.filter((d) => d.flags.includes('stale'));
+    if (!all.length) { $('#staleList').innerHTML = `<div class="empty">全部平板 ${staleDays()} 天內都有回報 👍</div>`; return; }
+    // 跟充電車總覽一樣依車分組（照 config.json 的車子順序），車內依格號排
+    $('#staleList').innerHTML = cartGroups().map(([label, list]) => {
+      const st = list.filter((d) => d.flags.includes('stale'));
+      if (!st.length) return '';
+      const items = st.map((d) => `<button class="stale-item" data-id="${d.id}" type="button" title="${esc(d.name)}">${d.kind === 'other' ? esc(d.name) : `${slotNo(d)} 號`}<small>${d.battery ?? '?'}%・${ago(d.reportedAt)}</small></button>`).join('');
+      return `<div class="cart stale-cart"><div class="cart-head"><h3>${esc(label)}</h3>
+        <span class="sum">${st.length} 台沒回報・共 ${list.length} 台</span></div>
+        <div class="stale-items">${items}</div></div>`;
+    }).join('');
   }
 
   function chart(hist) {
