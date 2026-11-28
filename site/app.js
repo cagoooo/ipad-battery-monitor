@@ -4,7 +4,7 @@
   const DONE_KEY = 'ipadBatt.done.v1';
   const PREF_KEY = 'ipadBatt.pref.v1';
   const REFRESH_MS = 5 * 60 * 1000;
-  const APP_VERSION = '1.4.2'; // 改版時同步改 sw.js、version.json、index.html 的 ?v=
+  const APP_VERSION = '1.4.3'; // 改版時同步改 sw.js、version.json、index.html 的 ?v=
   const FLAG = {
     critical: { t: '電量危險', c: 'var(--crit)' },
     low: { t: '電量偏低', c: 'var(--low)' },
@@ -50,7 +50,9 @@
   const where = (d) => d.kind === 'other' ? d.name : `${d.cartLabel}${d.slot != null ? ` ${slotNo(d)} 號` : ''}`;
   const doneKey = (d) => `${d.id}@${d.reportedAt}`;
   const isDone = (d) => !!done[doneKey(d)];
-  const batt = (d) => `<span class="batt" style="--c:${color(d)};--p:${d.battery ?? 0}"><span>${d.battery ?? '?'}%</span></span>`;
+  // 待檢查卡片：電量還夠、只是半夜沒充飽的，改用紫色（跟「半夜沒充飽」標籤同色），避免綠色被誤會成沒問題
+  const todoColor = (d) => (color(d) === 'var(--ok)' && d.flags.includes('night') ? 'var(--night)' : color(d));
+  const batt = (d, c = color(d)) => `<span class="batt" style="--c:${c};--p:${d.battery ?? 0}"><span>${d.battery ?? '?'}%</span></span>`;
   const tags = (d) => d.flags.filter((f) => FLAG[f]).map((f) => `<span class="tag" style="--t:${FLAG[f].c}">${FLAG[f].t}</span>`).join('');
 
   function toast(msg) {
@@ -120,8 +122,8 @@
     let items = todoItems();
     if (pref.hideDone) items = items.filter((d) => !isDone(d));
     $('#todoList').innerHTML = items.length ? items.map((d) => `
-      <div class="todo ${isDone(d) ? 'done' : ''}" style="--c:${color(d)}">
-        ${batt(d)}
+      <div class="todo ${isDone(d) ? 'done' : ''}" style="--c:${todoColor(d)}">
+        ${batt(d, todoColor(d))}
         <button class="open" data-id="${d.id}" type="button">
           <div class="where">${esc(where(d))}</div>
           <div class="meta">${esc(d.name)}・${ago(d.reportedAt)}回報${d.trend != null && d.trend !== 0 ? `・比上次${d.trend > 0 ? '多' : '少'} ${Math.abs(d.trend)}%` : ''}</div>
